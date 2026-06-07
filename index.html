@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0b0d12">
-<title>FNAC DARTY · Pièces Détachées SAV — V5.7</title>
+<title>FNAC DARTY · Pièces Détachées SAV — V5.7.1</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Barlow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -1541,6 +1541,19 @@
     background: var(--accent);
     border-color: var(--accent);
     color: #fff;
+  }
+  /* V5.7.1 : bouton « ▾ Voir tout / ▴ Réduire » discret, séparé visuellement
+     des chips de catégorie pour rester lisible. */
+  .pv-chip.pv-chip-toggle {
+    border-style: dashed;
+    color: var(--muted);
+    background: transparent;
+    font-style: italic;
+  }
+  .pv-chip.pv-chip-toggle:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--surface);
   }
   :root[data-theme="dark"] .pv-chip.active { color: var(--bg); }
   .pv-chip.active .pv-chip-count {
@@ -5050,6 +5063,7 @@ async function openPartsViewer(cardEl) {
   PV.filterText = '';
   PV.filterCat  = '__all__';
   PV.imgOnly  = false;
+  PV._chipsExpanded = false;  // V5.7.1 : repart en mode compact à chaque ouverture
   PV.search.value = '';
   PV.searchWrap.classList.remove('has-value');
   PV.title.textContent  = ctx.model || 'Pièces détachées';
@@ -5279,26 +5293,59 @@ function renderChips() {
   const cats = getCategories();
   const total = PV.rows.length;
   const withImg = PV.rows.filter(r => r._hasImage).length;
-  const items = [{ id: '__all__', label: 'Toutes', count: total }]
-    .concat(cats.map(c => ({ id: c, label: c, count: PV.rows.filter(r => (r.cat || r.sheet) === c).length })));
+  // Construit la liste des catégories triées par nombre de pièces (descendant).
+  const allCats = cats
+    .map(c => ({ id: c, label: c, count: PV.rows.filter(r => (r.cat || r.sheet) === c).length }))
+    .sort((a, b) => b.count - a.count);
+
+  // V5.7.1 : limite l'affichage à TOP_N catégories pour ne pas surcharger l'UI.
+  // L'utilisateur peut afficher tout via le bouton "▾ Voir tout".
+  const TOP_N = 5;
+  const expanded = !!PV._chipsExpanded;
+  const tooMany  = allCats.length > TOP_N;
+  let visibleCats = (expanded || !tooMany) ? allCats : allCats.slice(0, TOP_N);
+
+  // Si la catégorie actuellement sélectionnée n'est pas dans le top, on la
+  // garde visible pour ne pas masquer la sélection active.
+  if (!expanded && PV.filterCat !== '__all__' && !visibleCats.some(c => c.id === PV.filterCat)) {
+    const activeCat = allCats.find(c => c.id === PV.filterCat);
+    if (activeCat) visibleCats = visibleCats.concat([activeCat]);
+  }
+
+  const items = [{ id: '__all__', label: 'Toutes', count: total }].concat(visibleCats);
   const catsHtml = items.map(c =>
     '<button class="pv-chip ' + (PV.filterCat === c.id ? 'is-active' : '') + '" data-cat="' + escapeHtml(c.id) + '" type="button">' +
       escapeHtml(c.label) + ' <span class="pv-chip-count">' + c.count + '</span>' +
     '</button>'
   ).join('');
+
+  // Bouton ▾ Voir tout / ▴ Réduire si plus de TOP_N catégories
+  let toggleHtml = '';
+  if (tooMany) {
+    const hidden = allCats.length - TOP_N;
+    toggleHtml = expanded
+      ? '<button class="pv-chip pv-chip-toggle" data-chips-toggle type="button" title="Masquer les catégories supplémentaires">▴ Réduire</button>'
+      : '<button class="pv-chip pv-chip-toggle" data-chips-toggle type="button" title="Afficher toutes les catégories">▾ Voir tout (+' + hidden + ')</button>';
+  }
+
   const imgChipHtml = withImg > 0
     ? '<button class="pv-chip pv-chip-img ' + (PV.imgOnly ? 'is-active' : '') + '" data-img-only type="button" title="N\'afficher que les pièces avec image">' +
         '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M21 16l-5-5-7 7"/></svg> ' +
         'Avec image <span class="pv-chip-count">' + withImg + '</span>' +
       '</button>' : '';
   PV.chips.innerHTML =
-    '<span class="pv-chips-label">Filtrer</span>' + catsHtml + imgChipHtml;
+    '<span class="pv-chips-label">Filtrer</span>' + catsHtml + toggleHtml + imgChipHtml;
   PV.chips.querySelectorAll('[data-cat]').forEach(btn => {
     btn.addEventListener('click', () => {
       PV.filterCat = btn.getAttribute('data-cat');
       if (PV.view === 'detail') { PV.view = 'grid'; PV.detail = null; }
       renderPartsView();
     });
+  });
+  const toggleBtn = PV.chips.querySelector('[data-chips-toggle]');
+  if (toggleBtn) toggleBtn.addEventListener('click', () => {
+    PV._chipsExpanded = !PV._chipsExpanded;
+    renderChips();
   });
   const imgBtn = PV.chips.querySelector('[data-img-only]');
   if (imgBtn) imgBtn.addEventListener('click', () => {
@@ -6149,7 +6196,7 @@ const generatePreviewTxt   = document.getElementById('generatePreviewTxt');
 function buildSnapshot() {
   return {
     _exportedAt: new Date().toISOString(),
-    _version:    'V5.7',
+    _version:    'V5.7.1',
     baseUrl:     baseUrl || '',
     customBrands: customBrands,
     customModels: customModels,
@@ -6177,7 +6224,7 @@ generateHtmlBtn.addEventListener('click', () => {
     const ts   = new Date().toISOString().slice(0,16).replace(/[:T]/g, '-');
     const a    = document.createElement('a');
     a.href = url;
-    a.download = `FNAC_DARTY_PIECES_DETACHEES_V5_7_${ts}.html`;
+    a.download = `FNAC_DARTY_PIECES_DETACHEES_V5_7_1_${ts}.html`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1500);
     toast('Fichier HTML portable généré', 'success');
@@ -6271,7 +6318,7 @@ updateGeneratePreview();
 // V5.6 : précharge l'index des fichiers attachés en IDB pour marquer les cards
 refreshAttachedKeysCache().then(() => refreshAttachedBadges()).catch(() => {});
 
-console.info('%cFNAC · DARTY · SAV PEM%c · Pièces Détachées · V5.7',
+console.info('%cFNAC · DARTY · SAV PEM%c · Pièces Détachées · V5.7.1',
   'background:#e10915;color:#fff;padding:2px 8px;font-weight:700;letter-spacing:.5px;border-radius:2px;',
   'color:#666;font-weight:500;');
 console.info('Référent Bezons · Outil interne · ' + Object.keys(getAllBrands()).length + ' marque(s) · ' + document.querySelectorAll('.card').length + ' modèle(s)');
